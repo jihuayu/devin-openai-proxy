@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 import config
 import connect
+import engine
+import responses
 import transform
 
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +28,7 @@ logger = logging.getLogger("devin-proxy")
 if os.path.exists(".env"):
     load_dotenv(".env")
 
-app = FastAPI(title="Devin API ↔ OpenAI Reverse Proxy", version="0.3.0")
+app = FastAPI(title="Devin API ↔ OpenAI Reverse Proxy", version="0.4.0")
 
 
 @app.on_event("startup")
@@ -76,37 +78,6 @@ def _get_token(request: Request) -> Optional[str]:
     return _extract_token(auth)
 
 
-def _devin_auth_header(token: str) -> str:
-    return f"Basic {token}-{token}"
-
-
-def _devin_headers(token: str) -> Dict[str, str]:
-    return {
-        "Authorization": _devin_auth_header(token),
-        "Content-Type": config.DEVIN_CONTENT_TYPE,
-        "Accept": "*/*",
-        "Connect-Protocol-Version": "1",
-        "X-Raindrop-Sdk": config.DEVIN_SDK,
-    }
-
-
-def _devin_url(stream: bool) -> str:
-    path = config.DEVIN_STREAM_PATH if stream else config.DEVIN_UNARY_PATH
-    return config.DEVIN_BASE_URL + path
-
-
-def _call_devin(payload: bytes, token: str, stream: bool):
-    """Return an httpx stream context manager for the Devin Connect request."""
-    client: httpx.AsyncClient = app.state.client
-    body = connect.encode_connect_request(payload)
-    return client.stream(
-        "POST",
-        _devin_url(stream),
-        content=body,
-        headers=_devin_headers(token),
-    )
-
-
 @app.get("/health")
 async def health():
     return {"status": "ok", "devin_base_url": config.DEVIN_BASE_URL}
@@ -119,93 +90,6 @@ async def models():
         for m in config.DEFAULT_MODELS
     ]
     return {"object": "list", "data": data}
-
-
-async def _complete_non_streaming(
-    body: Dict[str, Any],
-    token: str,
-) -> Dict[str, Any]:
-    """Run one or more non-streaming GetChatMessage calls, optionally executing tools."""
-    original_body = dict(body)
-    original_body["messages"] = list(body.get("messages", []))
-
-    if config.AUTO_WEB_SEARCH:
-        transform.maybe_inject_web_search_tool(original_body)
-
-    for _ in range(config.WEB_SEARCH_MAX_ROUNDS):
-        try:
-            devin_payload, openai_model, generation_id = await transform.openai_to_devin_request(
-                original_body, token, app.state.client
-            )
-        except Exception as exc:
-            logger.exception("Failed to transform OpenAI request to Devin")
-            return {"error": {"message": f"Request transformation failed: {exc}"}}
-
-        async with _call_devin(devin_payload, token, stream=False) as resp:
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                try:
-                    detail = exc.response.json()
-                except Exception:
-                    detail = {"message": str(exc)}
-                return {"error": detail}
-            except httpx.RequestError as exc:
-                return {"error": {"message": str(exc)}}
-
-            completion = await transform.devin_frames_to_openai_completion(
-                resp, openai_model, generation_id
-            )
-            if completion.get("error"):
-                return completion
-
-        if not config.AUTO_WEB_SEARCH or completion["choices"][0]["finish_reason"] != "tool_calls":
-            return completion
-
-        queries = transform.get_web_search_queries(completion)
-        if not queries:
-            return completion
-
-        assistant_msg = {
-            "role": "assistant",
-            "content": completion["choices"][0]["message"].get("content", ""),
-            "tool_calls": completion["choices"][0]["message"].get("tool_calls", []),
-        }
-
-        tool_results = []
-        for i, call in enumerate(assistant_msg["tool_calls"]):
-            if call.get("function", {}).get("name") != "web_search":
-                continue
-            try:
-                args = json.loads(call["function"].get("arguments", "{}"))
-            except Exception:
-                continue
-            query = args.get("query", "")
-            num_results = args.get("num_results", config.WEB_SEARCH_NUM_RESULTS)
-            if not query:
-                continue
-            try:
-                result_text = await transform.execute_web_search(
-                    query, int(num_results), token, app.state.client
-                )
-            except Exception as exc:
-                result_text = f"Error executing web_search: {exc}"
-            tool_results.append((i, result_text))
-
-        continuation = list(original_body["messages"])
-        continuation.append(assistant_msg)
-        for i, result_text in tool_results:
-            call = assistant_msg["tool_calls"][i]
-            continuation.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.get("id"),
-                    "content": result_text,
-                }
-            )
-        original_body["messages"] = continuation
-
-    return completion
 
 
 @app.post("/v1/chat/completions")
@@ -228,7 +112,7 @@ async def chat_completions(request: Request):
             raise HTTPException(status_code=400, detail=f"Request transformation failed: {exc}")
 
         async def sse_generator() -> AsyncIterator[str]:
-            async with _call_devin(devin_payload, token, stream=True) as resp:
+            async with engine.call_devin(app.state.client, devin_payload, token, stream=True) as resp:
                 try:
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
@@ -255,10 +139,26 @@ async def chat_completions(request: Request):
         )
 
     # Non-streaming
-    completion = await _complete_non_streaming(body, token)
+    completion = await engine.complete_chat(app.state.client, body, token)
     if completion.get("error"):
         return JSONResponse(completion, status_code=400)
     return JSONResponse(completion)
+
+
+@app.post("/v1/responses")
+async def responses_endpoint(request: Request):
+    body = await request.json()
+    token = _get_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Authorization header or DEVIN_TOKEN")
+
+    if body.get("stream"):
+        raise HTTPException(status_code=400, detail="Responses streaming not yet supported")
+
+    response = await responses.create_response(app.state.client, body, token)
+    if response.get("error"):
+        return JSONResponse(response, status_code=400)
+    return JSONResponse(response)
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
@@ -277,7 +177,7 @@ async def passthrough(request: Request, path: str):
     headers = dict(request.headers)
     headers.pop("host", None)
     headers.pop("content-length", None)
-    headers["Authorization"] = _devin_auth_header(token)
+    headers["Authorization"] = engine.devin_auth_header(token)
     headers["X-Raindrop-Sdk"] = config.DEVIN_SDK
 
     body = None

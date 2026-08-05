@@ -13,6 +13,7 @@
 ## 主要特性
 
 - OpenAI `chat.completions` ↔ Devin protobuf `GetChatMessage`
+- OpenAI `responses.create`（非流式）适配：支持 `input` 字符串 / 消息列表 / `function_call_output`，输出 `message`、`function_call`、`web_search_call`
 - 支持流式 (`stream=true`) 与非流式 (`stream=false`)
 - 自动解析 Connect-RPC `[flags:1][length:4 BE][payload]` 帧
 - 文本消息映射，支持 system / user / assistant / tool 角色
@@ -94,6 +95,16 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
   -d '{"model":"swe-1-7","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
+Responses API 示例（非流式）：
+
+```bash
+DEVIN_TOKEN=$(sed -n 's/^windsurf_api_key = "\(.*\)"/\1/p' ~/.local/share/devin/credentials.toml)
+curl -s http://127.0.0.1:8000/v1/responses \
+  -H "Authorization: Bearer $DEVIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"swe-1-7","input":"current weather in Beijing","tools":[{"type":"web_search"}]}'
+```
+
 启用自动 `web_search`（非流式）后可直接问实时问题：
 
 ```bash
@@ -166,4 +177,5 @@ HTTPS_PROXY=http://127.0.0.1:8082 HTTP_PROXY=http://127.0.0.1:8082 devin -p "hel
 - `DEVIN_CONTEXT=true` 会注入较大的系统提示、上下文消息和 25 个内置工具，显著增加 token 消耗；非 Devin 场景建议关闭。
 - 注入的 `available_skills` / `tools` 是静态抓取文件，不会随用户本地的技能目录动态变化；如需更新，重新抓取或手动编辑 `devin_context/`。
 - `read` / `edit` / `grep` / `exec` 等内置工具目前只返回 `tool_calls`，由客户端执行；代理仅自动执行 `web_search`。
+- Responses API 仅支持非流式；`stream`、`previous_response_id`、内置 `file_search` / `code_interpreter` / `computer` 等工具尚未实现。
 - 依赖本地 `windsurf_api_key` 的推理配额；无配额时会收到 `resource_exhausted` 等错误。
