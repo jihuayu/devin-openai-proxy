@@ -49,6 +49,16 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
   -d '{"model":"swe-1-7","messages":[{"role":"user","content":"read /etc/hosts"}],"stream":false}'
 ```
 
+Responses API test (stream):
+
+```bash
+DEVIN_TOKEN=$(sed -n 's/^windsurf_api_key = "\(.*\)"/\1/p' ~/.local/share/devin/credentials.toml)
+curl -sN http://127.0.0.1:8000/v1/responses \
+  -H "Authorization: Bearer $DEVIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"swe-1-7","input":"current weather in Beijing","tools":[{"type":"web_search"}],"stream":true}'
+```
+
 Responses API test (non-stream):
 
 ```bash

@@ -153,7 +153,11 @@ async def responses_endpoint(request: Request):
         raise HTTPException(status_code=401, detail="Missing Authorization header or DEVIN_TOKEN")
 
     if body.get("stream"):
-        raise HTTPException(status_code=400, detail="Responses streaming not yet supported")
+        return StreamingResponse(
+            responses.stream_response(app.state.client, body, token),
+            media_type="text/event-stream; charset=utf-8",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
 
     response = await responses.create_response(app.state.client, body, token)
     if response.get("error"):
