@@ -1,0 +1,9 @@
+<system_info>
+The following information is automatically generated context about your current environment.
+Current workspace directories:
+  /Users/jihuayu/code/ai-chat (cwd)
+
+Platform: macos
+OS Version: Darwin 25.5.0
+Today's date: Wednesday, 2026-08-05
+</system_info>

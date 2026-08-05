@@ -1,0 +1,81 @@
+# Agent Notes
+
+## Build / Run
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+## Verification
+
+- `GET /health` should return `{"status":"ok","devin_base_url":"..."}`.
+- `GET /v1/models` returns a static OpenAI-style model list.
+- `POST /v1/chat/completions` with `stream=true` returns SSE; `stream=false` returns a single JSON completion.
+
+Quick curl test (uses local credentials):
+
+```bash
+DEVIN_TOKEN=$(sed -n 's/^windsurf_api_key = "\(.*\)"/\1/p' ~/.local/share/devin/credentials.toml)
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer $DEVIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"swe-1-7","messages":[{"role":"user","content":"hello"}],"stream":false}'
+```
+
+Web search test (non-stream, auto tool execution):
+
+```bash
+AUTO_WEB_SEARCH=true python -m uvicorn app:app --host 127.0.0.1 --port 8000
+
+DEVIN_TOKEN=$(sed -n 's/^windsurf_api_key = "\(.*\)"/\1/p' ~/.local/share/devin/credentials.toml)
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer $DEVIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"swe-1-7","messages":[{"role":"user","content":"current weather in Beijing"}],"stream":false}'
+```
+
+Devin CLI-like context and built-in tools:
+
+```bash
+DEVIN_CONTEXT=true AUTO_WEB_SEARCH=true python -m uvicorn app:app --host 127.0.0.1 --port 8000
+
+DEVIN_TOKEN=$(sed -n 's/^windsurf_api_key = "\(.*\)"/\1/p' ~/.local/share/devin/credentials.toml)
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer $DEVIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"swe-1-7","messages":[{"role":"user","content":"read /etc/hosts"}],"stream":false}'
+```
+
+Tool call test:
+
+```bash
+DEVIN_TOKEN=$(sed -n 's/^windsurf_api_key = "\(.*\)"/\1/p' ~/.local/share/devin/credentials.toml)
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer $DEVIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"swe-1-7","messages":[{"role":"user","content":"read /etc/hosts"}],"tools":[{"type":"function","function":{"name":"read","description":"Read a file","parameters":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}}],"stream":false}'
+```
+
+## Architecture
+
+- Real traffic was captured from `https://server.codeium.com/exa.api_server_pb.ApiServerService/GetChatMessage`.
+- Auth header: `Authorization: Basic <windsurf_api_key>-<windsurf_api_key>`.
+- Request/response use Connect-RPC protobuf frames `[flags:1][length:4 BE][payload]`.
+- `proto.py` manually encodes/decodes the captured wire field numbers.
+- `transform.py` builds the protobuf request and maps response fields back to OpenAI.
+- `connect_capture.py` is an `mitmdump` script for capturing CLI traffic.
+
+## Key files
+
+- `app.py` — FastAPI application and route handlers
+- `config.py` — environment variables, credentials loading, defaults
+- `connect.py` — minimal Connect-RPC envelope parser/encoder
+- `proto.py` — schema-less protobuf wire encoder/decoder
+- `transform.py` — OpenAI ↔ Devin protobuf conversion
+- `requirements.txt`
+- `.env.example`
+- `README.md`
+- `connect_capture.py` — mitmproxy capture helper

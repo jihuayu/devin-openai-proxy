@@ -1,0 +1,11 @@
+<available_skills>
+The following skills can be invoked using the `skill` tool. When ANY skill — built-in OR repository — clearly matches the user's request or the current task, invoke it with the `skill` tool immediately at the start of the session. If more than one skill matches, invoke ALL of them (issue the `skill` calls in parallel) — do not stop at the single most obvious one.
+
+- **chatgpt-plan-from-share**: 从 ChatGPT shared-chat URL 抽取可读聊天记录，并结合当前项目目录、代码、配置和已有文档，把探索性讨论整理成项目定义、技术方案或实施计划。适用于用户提供 chatgpt.com/share 链接、要求总结既有 ChatGPT 设计讨论、或希望从 LLM 对话沉淀出可执行项目方案的场景。 (source: /Users/jihuayu/.agents/skills/chatgpt-plan-from-share/SKILL.md)
+- **gh-stack**: Manage stacked branches and pull requests with the gh-stack GitHub CLI extension. Use when the user wants to create, push, rebase, sync, navigate, or view stacks of dependent PRs. Triggers on tasks involving stacked diffs, dependent pull requests, branch chains, or incremental code review workflows.
+ (source: /Users/jihuayu/.copilot/skills/gh-stack/SKILL.md)
+- **gh-stack**: Manage stacked branches and pull requests with the gh-stack GitHub CLI extension. Use when the user wants to create, push, rebase, sync, navigate, or view stacks of dependent PRs. Triggers on tasks involving stacked diffs, dependent pull requests, branch chains, or incremental code review workflows.
+ (source: /Users/jihuayu/.codeium/windsurf/skills/gh-stack/SKILL.md)
+- **devin-cli**: Look up Devin CLI documentation (skills, extensibility, configuration, commands, models, troubleshooting) (source: /Users/jihuayu/.local/share/devin/cli/_versions/3000.3.27/share/devin/docs)
+- **declarative-repo-setup**: Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo (source: builtin:drs)
+</available_skills>
